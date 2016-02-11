@@ -26,6 +26,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     libmozjs185-1.0 \
     libnspr4 \
     libnspr4-0d \
+    git \
   && rm -rf /var/lib/apt/lists/*
 
 # grab gosu for easy step-down from root and tini for signal handling
@@ -80,12 +81,26 @@ RUN buildDeps=' \
   && tar -xzf couchdb.tar.gz -C /usr/src/couchdb --strip-components=1 \
   && cd /usr/src/couchdb \
   && ./configure --with-js-lib=/usr/lib --with-js-include=/usr/include/mozjs \
-  && make && make install \
-  && apt-get purge -y --auto-remove $buildDeps \
-  && rm -rf /var/lib/apt/lists/* /usr/src/couchdb /couchdb.tar.gz* \
+  && make && make install
+
+ENV COUCH_SRC /usr/src/couchdb/src/couchdb/
+
+# download geocouch, compile the plugin
+# and add configuration to couchdb
+WORKDIR /usr/src
+RUN curl -fSL https://github.com/couchbase/geocouch/archive/couchdb1.3.x.tar.gz -o geocouch.tar.gz \
+  && mkdir geocouch \
+  && tar -xzf geocouch.tar.gz -C /usr/src/geocouch --strip-components=1 \
+  && cd /usr/src/geocouch \
+  && make \
+  && cp /usr/src/geocouch/etc/couchdb/default.d/geocouch.ini /usr/local/etc/couchdb/default.d/geocouch.ini
+
+RUN apt-get purge -y --auto-remove $buildDeps \
+  && rm -rf /var/lib/apt/lists/* /usr/src/couchdb /couchdb.tar.gz* /usr/src/geocouch.tar.gz \
   && chown -R couchdb:couchdb \
     /usr/local/lib/couchdb /usr/local/etc/couchdb \
     /usr/local/var/lib/couchdb /usr/local/var/log/couchdb /usr/local/var/run/couchdb \
+    /usr/src/geocouch/ebin \
   && chmod -R g+rw \
     /usr/local/lib/couchdb /usr/local/etc/couchdb \
     /usr/local/var/lib/couchdb /usr/local/var/log/couchdb /usr/local/var/run/couchdb \
@@ -100,6 +115,9 @@ VOLUME ["/usr/local/var/lib/couchdb"]
 
 EXPOSE 5984
 WORKDIR /var/lib/couchdb
+
+# pass the plugins location to couchdb
+ENV ERL_FLAGS="+A 4 -pa /usr/src/geocouch/ebin"
 
 ENTRYPOINT ["tini", "--", "/docker-entrypoint.sh"]
 CMD ["couchdb"]
